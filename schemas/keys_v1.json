@@ -1,0 +1,43 @@
+{
+  "schema": "keys.event",
+  "version": 1,
+  "description": "Keyboard/pedal telemetry message directory. One record per message: integer beat, within-beat sequence, channel, action, and the pitch for key actions. The root tag (application 40) is distinct from telemetry.record (universal 16) so the two streams can never be confused on the wire. Actions: 0=key down, 1=key up, 2=pedal down, 3=pedal up; pitch is present exactly for key actions.",
+  "root": {
+    "name": "KeyEvent",
+    "tag": {"class": "application", "number": 40},
+    "type": "SEQUENCE",
+    "fields": [
+      {
+        "name": "beat",
+        "tag": {"class": "context", "number": 0},
+        "mode": "implicit",
+        "type": "INTEGER"
+      },
+      {
+        "name": "seq",
+        "tag": {"class": "context", "number": 1},
+        "mode": "implicit",
+        "type": "INTEGER"
+      },
+      {
+        "name": "channel",
+        "tag": {"class": "context", "number": 2},
+        "mode": "implicit",
+        "type": "INTEGER"
+      },
+      {
+        "name": "action",
+        "tag": {"class": "context", "number": 3},
+        "mode": "implicit",
+        "type": "INTEGER"
+      },
+      {
+        "name": "pitch",
+        "tag": {"class": "context", "number": 4},
+        "mode": "implicit",
+        "type": "INTEGER",
+        "optional": true
+      }
+    ]
+  }
+}

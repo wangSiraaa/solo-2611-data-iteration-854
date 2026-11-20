@@ -99,7 +99,9 @@ declared base type.
 | `telber/repository.py` | SQLite product registry + per-record fact relation store |
 | `telber/service.py` | independent compile service: artifact, check, encode |
 | `telber/build.py` | independent byte builder used only by tests/demo |
-| `telber/demo.py`, `telber/cli.py` | demo and command-line entry points |
+| `telber/keys.py` | keyboard/pedal messages compiled into a sustained-note product |
+| `telber/player.py` | finite-voice replay of a performance product |
+| `telber/demo.py`, `telber/keydemo.py`, `telber/cli.py` | demo and command-line entry points |
 
 Two source modules carry the core: `schema.py` + `codec.py` compile and
 interpret the directory, and `stream.py` + `repository.py` produce the streaming
@@ -135,6 +137,49 @@ committed as a **partial** import with the error code, absolute offset and the
 failing record's start offset. A partial import cannot be published as
 whole-stream complete. There is no resynchronisation: the scanner never scans
 forward for a plausible tag.
+
+## Keyboard/pedal performances
+
+A second record class, `keys.event` (`schemas/keys_v1.json`, root tag
+application 40 so it can never be confused with `telemetry.record`), carries
+offline keyboard telemetry: one message per record with integer beat,
+within-beat sequence, channel and action (key down/up, pedal down/up; key
+actions carry a pitch). Ordinary telemetry usage is unchanged.
+
+`telber/keys.py` compiles an import of these messages into an immutable,
+JSON-round-trippable **performance product**:
+
+* every key press creates an independent voice identity; re-pressing a held
+  pitch is legal and each release pairs with the earliest still-held press;
+* the sustain pedal is per channel: a key released under the pedal sounds
+  until the pedal lifts, and lifting the pedal ends only already-released
+  voices;
+* same-beat messages apply one by one in sequence order; the product keeps
+  the within-beat order, the raw press position and the should-stop position;
+* extra releases are reported with their source message (record ordinal and
+  absolute stream offsets); voices unfinished at the recording cutoff keep an
+  undefined right end;
+* finger-held intervals and natural sounding intervals are both queryable
+  from the same product file (`keys-report`).
+
+`telber/player.py` is a separate reader of the product: given a total voice
+count and per-channel priorities it replays the performance. A natural stop
+frees its slot at its actual event position; when a new voice arrives with no
+free slot, the new voice competes with the holders and the lowest priority
+loses (ties go against the earliest-started voice — if the new voice loses it
+never sounds). A voice is played at most once: a truncated tail never
+revives. The replay reports per-voice actually-sounding intervals with their
+outcome (`natural` / `truncated` / `no_voice` / `open`) and answers which
+voices are audible at a given beat position. Adjusting the player never
+changes the product.
+
+```bash
+python3 -m telber.keydemo                 # synthetic recording + 3 replays
+python3 tools/keys_demo.py --out out/     # writes keys.bin, DB, performance.json, replay.json
+python3 -m telber.cli keys-export keys.sqlite --import-id 1 -o performance.json
+python3 -m telber.cli keys-report performance.json
+python3 -m telber.cli keys-replay performance.json --voices 1 --priority 0=2 --priority 1=1 --at 3:0
+```
 
 ## Running
 
@@ -173,4 +218,9 @@ Coverage highlights (`tests/`):
   definite and indefinite encodings;
 * `test_demo_truth.py` — checks the demo's relation table against an
   independently derived presence map and byte ranges;
+* `test_keys.py` — keyboard/pedal product and player: wire round-trip against
+  independently built bytes, pedal/same-beat semantics, re-press voice
+  identity under interleaved releases, orphan releases with provenance,
+  cutoff right ends, the three single-voice replay scenarios, product JSON
+  round-trip, player immutability, telemetry coexistence, demo truth, CLI;
 * `test_scale.py` — depth 32, 100 MiB stream, 2 MiB body cap (opt-in).

@@ -91,3 +91,19 @@ class ImportStateError(TelberError):
     """An import cannot be mutated in the requested way."""
 
     code = "import_state_error"
+
+
+class KeysError(TelberError):
+    """A keyboard/pedal message stream cannot be compiled into a performance.
+
+    Carries the absolute stream offset of the offending message when the
+    messages were read from a repository import.
+    """
+
+    code = "keys_error"
+
+
+class PlayerError(TelberError):
+    """A replay request is invalid (for example a non-positive voice count)."""
+
+    code = "player_error"

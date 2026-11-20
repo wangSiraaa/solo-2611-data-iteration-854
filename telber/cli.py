@@ -8,6 +8,13 @@ Examples::
     python3 -m telber.cli encode product.json values.json -o record.bin
     python3 -m telber.cli ingest product.json telemetry.bin -o telemetry.sqlite
     python3 -m telber.cli report telemetry.sqlite
+
+Keyboard/pedal performance products::
+
+    python3 -m telber.cli ingest keys_product.json keys.bin --db keys.sqlite
+    python3 -m telber.cli keys-export keys.sqlite --import-id 1 -o performance.json
+    python3 -m telber.cli keys-report performance.json
+    python3 -m telber.cli keys-replay performance.json --voices 1 --priority 0=2 --priority 1=1 --at 3:0
 """
 
 from __future__ import annotations
@@ -20,6 +27,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from telber.errors import TelberError  # noqa: E402
+from telber.keys import Pos, load_performance, performance_from_import  # noqa: E402
+from telber.player import replay  # noqa: E402
 from telber.repository import Repository  # noqa: E402
 from telber.service import CompileService  # noqa: E402
 
@@ -114,6 +123,92 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_keys_export(args) -> int:
+    """Build the sustained-note performance product from a keys.event import."""
+    try:
+        with Repository(args.db) as repo:
+            performance = performance_from_import(repo, args.import_id)
+    except TelberError as exc:
+        print(json.dumps(exc.as_dict(), indent=2), file=sys.stderr)
+        return 2
+    text = performance.to_json()
+    if args.out:
+        Path(args.out).write_text(text, encoding="utf-8")
+        print(f"performance product ({len(performance.voices)} voices) -> {args.out}")
+    else:
+        print(text, end="")
+    return 0
+
+
+def _interval_rows(performance, intervals):
+    return [
+        {
+            "voice": row["voice"],
+            "channel": row["channel"],
+            "pitch": row["pitch"],
+            "start": list(row["start"]),
+            "end": None if row["end"] is None else list(row["end"]),
+        }
+        for row in intervals
+    ]
+
+
+def cmd_keys_report(args) -> int:
+    """Show both interval kinds of a performance product read from its file."""
+    try:
+        performance = load_performance(args.performance)
+    except TelberError as exc:
+        print(json.dumps(exc.as_dict(), indent=2), file=sys.stderr)
+        return 2
+    out = {
+        "voices": len(performance.voices),
+        "finger_intervals": _interval_rows(performance, performance.finger_intervals()),
+        "sounding_intervals": _interval_rows(performance, performance.sounding_intervals()),
+        "orphan_releases": [o.as_dict() for o in performance.orphan_releases],
+    }
+    print(json.dumps(out, indent=2))
+    return 0
+
+
+def _parse_priority(text: str) -> tuple[int, int]:
+    try:
+        channel, prio = text.split("=", 1)
+        return int(channel), int(prio)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"priority must look like CHANNEL=PRIO, got {text!r}"
+        ) from None
+
+
+def _parse_pos(text: str) -> Pos:
+    sep = ":" if ":" in text else ","
+    try:
+        beat, seq = text.split(sep, 1)
+        return Pos(int(beat), int(seq))
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"position must look like BEAT:SEQ, got {text!r}"
+        ) from None
+
+
+def cmd_keys_replay(args) -> int:
+    """Replay a performance product file under a finite-voice player."""
+    try:
+        performance = load_performance(args.performance)
+        result = replay(performance, args.voices, dict(args.priority))
+    except TelberError as exc:
+        print(json.dumps(exc.as_dict(), indent=2), file=sys.stderr)
+        return 2
+    out = result.as_dict()
+    if args.at:
+        out["audible_at"] = {
+            f"{pos.beat}:{pos.seq}": [p.voice_id for p in result.audible_at(pos)]
+            for pos in args.at
+        }
+    print(json.dumps(out, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="telber", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -147,6 +242,46 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--import-id", type=int, default=None)
     p.add_argument("--relation", action="store_true", help="include record/field facts")
     p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser(
+        "keys-export",
+        help="derive the sustained-note performance product from a keys.event import",
+    )
+    p.add_argument("db")
+    p.add_argument("--import-id", type=int, required=True)
+    p.add_argument("-o", "--out")
+    p.set_defaults(func=cmd_keys_export)
+
+    p = sub.add_parser(
+        "keys-report",
+        help="show finger-held and natural sounding intervals of a performance product",
+    )
+    p.add_argument("performance")
+    p.set_defaults(func=cmd_keys_report)
+
+    p = sub.add_parser(
+        "keys-replay",
+        help="replay a performance product file under a finite-voice player",
+    )
+    p.add_argument("performance")
+    p.add_argument("--voices", type=int, required=True, help="total number of voice slots")
+    p.add_argument(
+        "--priority",
+        type=_parse_priority,
+        action="append",
+        default=[],
+        metavar="CHANNEL=PRIO",
+        help="per-channel priority (higher wins); repeatable, unlisted channels are 0",
+    )
+    p.add_argument(
+        "--at",
+        type=_parse_pos,
+        action="append",
+        default=[],
+        metavar="BEAT:SEQ",
+        help="also list the voices audible at this position; repeatable",
+    )
+    p.set_defaults(func=cmd_keys_replay)
 
     args = parser.parse_args(argv)
     return args.func(args)

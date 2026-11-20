@@ -20,4 +20,5 @@ Modules:
 | `test_repository.py` | product binding, relation rows, partial imports |
 | `test_service.py` | artifact recompilation, presence/type preservation |
 | `test_demo_truth.py` | demo relation table against independent truth |
+| `test_keys.py` | keyboard/pedal performance product and finite-voice player |
 | `test_scale.py` | 100 MiB / 1 MiB records / 2 MiB body cap (opt-in) |
